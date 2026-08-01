@@ -1,6 +1,7 @@
 "use client";
 
 import type { AnalysisResult } from "@/lib/api";
+import { getPdfUrl } from "@/lib/api";
 import {
   BarChart,
   Bar,
@@ -36,7 +37,12 @@ export default function RatioLedger({ result }: { result: AnalysisResult }) {
 
   return (
     <div className="mt-14 space-y-10">
-      {/* Data warnings - shown before the summary since they affect how much to trust it */}
+      <div className="flex justify-end">
+        <a href={getPdfUrl(result.id)} download className="inline-flex items-center gap-2 text-sm text-ink/70 border border-rule px-4 py-2 hover:border-ink hover:text-ink transition-colors font-body">
+          Download PDF
+        </a>
+      </div>
+
       {result.warnings && result.warnings.length > 0 && (
         <div className="border-l-2 border-watch pl-6 py-1 bg-watch-soft/40">
           <p className="text-xs uppercase tracking-widest text-watch font-body mb-2">
@@ -52,7 +58,6 @@ export default function RatioLedger({ result }: { result: AnalysisResult }) {
         </div>
       )}
 
-      {/* Overall summary */}
       <div className="border-l-2 border-ink pl-6 py-1">
         <p className="text-xs uppercase tracking-widest text-ink/50 font-body mb-2">
           Summary
@@ -62,7 +67,6 @@ export default function RatioLedger({ result }: { result: AnalysisResult }) {
         </p>
       </div>
 
-      {/* Chart */}
       <div className="border-t border-rule pt-8">
         <p className="text-xs uppercase tracking-widest text-ink/50 font-body mb-4">
           Ratios at a glance
@@ -97,7 +101,6 @@ export default function RatioLedger({ result }: { result: AnalysisResult }) {
         </div>
       </div>
 
-      {/* Ledger rows */}
       <div className="border-t border-rule">
         <p className="text-xs uppercase tracking-widest text-ink/50 font-body pt-8 mb-4">
           Ratio by ratio

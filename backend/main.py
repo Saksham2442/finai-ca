@@ -1,9 +1,10 @@
 """
 FinAI CA - Backend
-Stage 1: ratio math. Stage 2: AI explanations. Stage 4: persistence. Stage 6: validation.
+Stage 1: ratio math. Stage 2: AI explanations. Stage 4: persistence.
+Stage 6: validation. Stage 7: PDF export.
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ load_dotenv()  # reads GEMINI_API_KEY from .env into the environment
 from ratios import compute_ratios
 from ai_explain import explain_ratios
 from validation import check_warnings
+from pdf_export import generate_pdf
 import database
 
 app = FastAPI(title="FinAI CA - Ratio Engine")
@@ -29,13 +31,6 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=True,
 )
-
-# Fields that must not be negative - a business can have a zero balance,
-# but never a genuinely negative asset/liability/revenue figure here.
-NON_NEGATIVE_FIELDS = [
-    "revenue", "cost_of_goods_sold", "current_assets", "current_liabilities",
-    "inventory", "total_assets", "total_liabilities", "total_equity",
-]
 
 
 class FinancialInput(BaseModel):
@@ -105,7 +100,7 @@ async def analyze_csv(file: UploadFile = File(...)):
 def analyze_manual_explain(payload: FinancialInput):
     """
     Stage 2 + 4 + 6 endpoint: computes ratios, checks for suspicious input,
-    gets AI explanations, and saves the full result to the database.
+    gets AI explanations, and saves the full result (including warnings) to the database.
     """
     ratio_fields = _ratio_fields(payload)
     warnings = check_warnings(ratio_fields)
@@ -128,6 +123,7 @@ def analyze_manual_explain(payload: FinancialInput):
         input_data=payload.model_dump(),
         ratios=ratios,
         analysis=analysis,
+        warnings=warnings,
     )
 
     return {
@@ -152,6 +148,24 @@ def get_one_analysis(analysis_id: int):
     if result is None:
         raise HTTPException(status_code=404, detail="Analysis not found")
     return result
+
+
+@app.get("/analyses/{analysis_id}/pdf")
+def download_analysis_pdf(analysis_id: int):
+    """Stage 7: generate and return a PDF report for a saved analysis."""
+    result = database.get_analysis(analysis_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    pdf_bytes = generate_pdf(result)
+    company_slug = "".join(c if c.isalnum() else "_" for c in result["company_name"])
+    filename = f"{company_slug}_financial_analysis.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/health")

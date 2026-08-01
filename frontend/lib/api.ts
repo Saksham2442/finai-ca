@@ -89,3 +89,7 @@ export async function fetchAnalysisById(id: number): Promise<AnalysisResult> {
   }
   return res.json();
 }
+
+export function getPdfUrl(id: number): string {
+  return `${API_BASE}/analyses/${id}/pdf`;
+}

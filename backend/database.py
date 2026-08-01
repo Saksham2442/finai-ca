@@ -1,5 +1,5 @@
 """
-Stage 4: Persistence layer.
+Stage 4: Persistence layer. Stage 7: added warnings storage.
 
 Uses SQLite - a single file database, zero setup required. Good fit for
 this project's scale: one file (finai.db) that lives next to your code,
@@ -15,7 +15,11 @@ DB_PATH = "finai.db"
 
 
 def init_db():
-    """Create the analyses table if it doesn't exist yet. Safe to call every startup."""
+    """
+    Create the analyses table if it doesn't exist yet, and add the
+    warnings_json column if it's missing (safe to run on an existing
+    database created before Stage 7 - won't touch your saved rows).
+    """
     with get_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS analyses (
@@ -27,6 +31,9 @@ def init_db():
                 analysis_json TEXT NOT NULL
             )
         """)
+        existing_cols = [row["name"] for row in conn.execute("PRAGMA table_info(analyses)")]
+        if "warnings_json" not in existing_cols:
+            conn.execute("ALTER TABLE analyses ADD COLUMN warnings_json TEXT DEFAULT '[]'")
         conn.commit()
 
 
@@ -40,13 +47,15 @@ def get_connection():
         conn.close()
 
 
-def save_analysis(company_name: str, input_data: dict, ratios: dict, analysis: dict) -> int:
+def save_analysis(
+    company_name: str, input_data: dict, ratios: dict, analysis: dict, warnings: list | None = None
+) -> int:
     """Save a completed analysis. Returns the new row's id."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO analyses (company_name, created_at, input_json, ratios_json, analysis_json)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO analyses (company_name, created_at, input_json, ratios_json, analysis_json, warnings_json)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 company_name,
@@ -54,6 +63,7 @@ def save_analysis(company_name: str, input_data: dict, ratios: dict, analysis: d
                 json.dumps(input_data),
                 json.dumps(ratios),
                 json.dumps(analysis),
+                json.dumps(warnings or []),
             ),
         )
         conn.commit()
@@ -81,4 +91,6 @@ def get_analysis(analysis_id: int) -> dict | None:
         result["input"] = json.loads(result.pop("input_json"))
         result["ratios"] = json.loads(result.pop("ratios_json"))
         result["analysis"] = json.loads(result.pop("analysis_json"))
+        # Older rows saved before Stage 7 won't have this column populated
+        result["warnings"] = json.loads(result.pop("warnings_json", None) or "[]")
         return result
