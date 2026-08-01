@@ -85,6 +85,7 @@ export default function UploadForm({
               <input
                 type="number"
                 step="any"
+                min="0"
                 required
                 value={values[key] ?? ""}
                 onChange={(e) => handleChange(key, e.target.value)}

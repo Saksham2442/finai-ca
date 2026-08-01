@@ -29,12 +29,32 @@ export interface AnalysisResult {
     explanations: RatioExplanation[];
     overall_summary: string;
   };
+  warnings: string[];
 }
 
 export interface AnalysisSummary {
   id: number;
   company_name: string;
   created_at: string;
+}
+
+// FastAPI validation errors (422) come back as an array of objects like
+// { loc: ["body", "revenue"], msg: "Value error, revenue cannot be negative" }
+// rather than a single string. This turns either shape into one readable message.
+function extractErrorMessage(body: any, fallbackStatus: number): string {
+  if (typeof body.detail === "string") {
+    return body.detail;
+  }
+  if (Array.isArray(body.detail)) {
+    return body.detail
+      .map((err: any) => {
+        const field = Array.isArray(err.loc) ? err.loc[err.loc.length - 1] : "input";
+        const msg = (err.msg || "").replace(/^Value error,\s*/, "");
+        return `${field}: ${msg}`;
+      })
+      .join("; ");
+  }
+  return `Request failed with status ${fallbackStatus}`;
 }
 
 export async function analyzeManual(
@@ -48,7 +68,7 @@ export async function analyzeManual(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed with status ${res.status}`);
+    throw new Error(extractErrorMessage(body, res.status));
   }
 
   return res.json();

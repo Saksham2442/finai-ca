@@ -1,11 +1,11 @@
 """
 FinAI CA - Backend
-Stage 1: ratio math. Stage 2: AI explanations. Stage 4: persistence.
+Stage 1: ratio math. Stage 2: AI explanations. Stage 4: persistence. Stage 6: validation.
 """
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from dotenv import load_dotenv
 import pandas as pd
 import io
@@ -14,6 +14,7 @@ load_dotenv()  # reads GEMINI_API_KEY from .env into the environment
 
 from ratios import compute_ratios
 from ai_explain import explain_ratios
+from validation import check_warnings
 import database
 
 app = FastAPI(title="FinAI CA - Ratio Engine")
@@ -29,19 +30,36 @@ app.add_middleware(
     allow_credentials=True,
 )
 
+# Fields that must not be negative - a business can have a zero balance,
+# but never a genuinely negative asset/liability/revenue figure here.
+NON_NEGATIVE_FIELDS = [
+    "revenue", "cost_of_goods_sold", "current_assets", "current_liabilities",
+    "inventory", "total_assets", "total_liabilities", "total_equity",
+]
+
 
 class FinancialInput(BaseModel):
     """Manual entry input - the numbers a small business owner would actually have on hand."""
     company_name: str = "Untitled"
     revenue: float
     cost_of_goods_sold: float
-    net_income: float
+    net_income: float  # allowed to be negative - a business can post a loss
     current_assets: float
     current_liabilities: float
     inventory: float
     total_assets: float
     total_liabilities: float
     total_equity: float
+
+    @field_validator(
+        "revenue", "cost_of_goods_sold", "current_assets", "current_liabilities",
+        "inventory", "total_assets", "total_liabilities", "total_equity",
+    )
+    @classmethod
+    def must_be_non_negative(cls, value: float, info):
+        if value < 0:
+            raise ValueError(f"{info.field_name} cannot be negative")
+        return value
 
 
 def _ratio_fields(payload: FinancialInput) -> dict:
@@ -86,10 +104,13 @@ async def analyze_csv(file: UploadFile = File(...)):
 @app.post("/analyze/manual/explain")
 def analyze_manual_explain(payload: FinancialInput):
     """
-    Stage 2 + 4 endpoint: computes ratios, gets AI explanations, and saves
-    the full result to the database so it shows up in history.
+    Stage 2 + 4 + 6 endpoint: computes ratios, checks for suspicious input,
+    gets AI explanations, and saves the full result to the database.
     """
-    ratios = compute_ratios(_ratio_fields(payload))
+    ratio_fields = _ratio_fields(payload)
+    warnings = check_warnings(ratio_fields)
+    ratios = compute_ratios(ratio_fields)
+
     try:
         analysis = explain_ratios(ratios)
     except Exception as e:
@@ -114,6 +135,7 @@ def analyze_manual_explain(payload: FinancialInput):
         "input": payload.model_dump(),
         "ratios": ratios,
         "analysis": analysis,
+        "warnings": warnings,
     }
 
 

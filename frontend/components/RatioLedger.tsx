@@ -36,6 +36,22 @@ export default function RatioLedger({ result }: { result: AnalysisResult }) {
 
   return (
     <div className="mt-14 space-y-10">
+      {/* Data warnings - shown before the summary since they affect how much to trust it */}
+      {result.warnings && result.warnings.length > 0 && (
+        <div className="border-l-2 border-watch pl-6 py-1 bg-watch-soft/40">
+          <p className="text-xs uppercase tracking-widest text-watch font-body mb-2">
+            Worth double-checking
+          </p>
+          <ul className="space-y-1.5">
+            {result.warnings.map((w, i) => (
+              <li key={i} className="text-sm text-ink/80 font-body leading-relaxed">
+                {w}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Overall summary */}
       <div className="border-l-2 border-ink pl-6 py-1">
         <p className="text-xs uppercase tracking-widest text-ink/50 font-body mb-2">
