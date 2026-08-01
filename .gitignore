@@ -1,0 +1,10 @@
+venv/
+node_modules/
+.next/
+.env.local
+.env
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+finai.db
