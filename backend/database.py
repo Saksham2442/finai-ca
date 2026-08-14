@@ -1,5 +1,5 @@
 """
-Stage 4: Persistence layer. Stage 7: added warnings storage.
+Stage 4: Persistence layer. Stage 7: added warnings storage. Stage 8: added users.
 
 Uses SQLite - a single file database, zero setup required. Good fit for
 this project's scale: one file (finai.db) that lives next to your code,
@@ -16,11 +16,20 @@ DB_PATH = "finai.db"
 
 def init_db():
     """
-    Create the analyses table if it doesn't exist yet, and add the
-    warnings_json column if it's missing (safe to run on an existing
-    database created before Stage 7 - won't touch your saved rows).
+    Create tables if they don't exist yet, and add any columns that were
+    introduced in later stages (safe to run on an existing database -
+    won't touch your already-saved rows).
     """
     with get_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT,
+                google_id TEXT UNIQUE,
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS analyses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,6 +43,10 @@ def init_db():
         existing_cols = [row["name"] for row in conn.execute("PRAGMA table_info(analyses)")]
         if "warnings_json" not in existing_cols:
             conn.execute("ALTER TABLE analyses ADD COLUMN warnings_json TEXT DEFAULT '[]'")
+        if "user_id" not in existing_cols:
+            # Existing rows from before auth was added have no owner - left NULL,
+            # meaning they won't show up in anyone's history but aren't deleted either.
+            conn.execute("ALTER TABLE analyses ADD COLUMN user_id INTEGER")
         conn.commit()
 
 
@@ -47,15 +60,50 @@ def get_connection():
         conn.close()
 
 
+# ---- Users ----
+
+def create_user(email: str, password_hash: str | None = None, google_id: str | None = None) -> int:
+    """Create a new user (email/password, Google, or both). Returns the new user's id."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO users (email, password_hash, google_id, created_at) VALUES (?, ?, ?, ?)",
+            (email, password_hash, google_id, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_user_by_email(email: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_google_id(google_id: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE google_id = ?", (google_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def link_google_id(user_id: int, google_id: str):
+    """Link a Google account to an existing email/password user."""
+    with get_connection() as conn:
+        conn.execute("UPDATE users SET google_id = ? WHERE id = ?", (google_id, user_id))
+        conn.commit()
+
+
+# ---- Analyses (now scoped to a user) ----
+
 def save_analysis(
-    company_name: str, input_data: dict, ratios: dict, analysis: dict, warnings: list | None = None
+    company_name: str, input_data: dict, ratios: dict, analysis: dict,
+    warnings: list | None = None, user_id: int | None = None,
 ) -> int:
-    """Save a completed analysis. Returns the new row's id."""
+    """Save a completed analysis, owned by the given user. Returns the new row's id."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO analyses (company_name, created_at, input_json, ratios_json, analysis_json, warnings_json)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO analyses (company_name, created_at, input_json, ratios_json, analysis_json, warnings_json, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 company_name,
@@ -64,26 +112,28 @@ def save_analysis(
                 json.dumps(ratios),
                 json.dumps(analysis),
                 json.dumps(warnings or []),
+                user_id,
             ),
         )
         conn.commit()
         return cursor.lastrowid
 
 
-def list_analyses() -> list[dict]:
-    """Return a lightweight list of past analyses (no full detail) for a history view."""
+def list_analyses(user_id: int) -> list[dict]:
+    """Return this user's past analyses, most recent first."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, company_name, created_at FROM analyses ORDER BY created_at DESC"
+            "SELECT id, company_name, created_at FROM analyses WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
         ).fetchall()
         return [dict(row) for row in rows]
 
 
-def get_analysis(analysis_id: int) -> dict | None:
-    """Fetch one full analysis by id, or None if it doesn't exist."""
+def get_analysis(analysis_id: int, user_id: int) -> dict | None:
+    """Fetch one full analysis by id, but only if it belongs to this user."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM analyses WHERE id = ?", (analysis_id,)
+            "SELECT * FROM analyses WHERE id = ? AND user_id = ?", (analysis_id, user_id)
         ).fetchone()
         if row is None:
             return None
@@ -91,6 +141,5 @@ def get_analysis(analysis_id: int) -> dict | None:
         result["input"] = json.loads(result.pop("input_json"))
         result["ratios"] = json.loads(result.pop("ratios_json"))
         result["analysis"] = json.loads(result.pop("analysis_json"))
-        # Older rows saved before Stage 7 won't have this column populated
         result["warnings"] = json.loads(result.pop("warnings_json", None) or "[]")
         return result
