@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import UploadForm from "@/components/UploadForm";
 import RatioLedger from "@/components/RatioLedger";
 import HistoryList from "@/components/HistoryList";
@@ -12,14 +13,28 @@ import {
   type AnalysisSummary,
   type FinancialInput,
 } from "@/lib/api";
+import { isLoggedIn, getEmail, clearToken } from "@/lib/auth";
 
 export default function Home() {
+  const router = useRouter();
+  const [checkedAuth, setCheckedAuth] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<AnalysisSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isLoggedIn()) {
+      router.push("/login");
+      return;
+    }
+    setEmail(getEmail());
+    setCheckedAuth(true);
+  }, [router]);
 
   async function loadHistory() {
     setHistoryLoading(true);
@@ -34,8 +49,10 @@ export default function Home() {
   }
 
   useEffect(() => {
-    loadHistory();
-  }, []);
+    if (checkedAuth) {
+      loadHistory();
+    }
+  }, [checkedAuth]);
 
   async function handleSubmit(input: FinancialInput) {
     setLoading(true);
@@ -71,6 +88,15 @@ export default function Home() {
     }
   }
 
+  function handleLogout() {
+    clearToken();
+    router.push("/login");
+  }
+
+  if (!checkedAuth) {
+    return null;
+  }
+
   return (
     <main className="min-h-screen bg-paper">
       <div className="max-w-3xl mx-auto px-6 py-16 sm:py-24">
@@ -81,16 +107,27 @@ export default function Home() {
           <h1 className="font-display text-4xl sm:text-5xl text-ink leading-tight mb-4">
             What your numbers are actually telling you.
           </h1>
-          <p className="font-body text-ink/70 text-base leading-relaxed max-w-xl">
-            Enter your financials below. We compute the ratios and explain
-            what each one means in plain language — the read a CA would
-            give you, without the wait.
-          </p>
-          <p className="text-xs text-ink/40 font-body mt-4 max-w-xl">
-            This is an AI-generated analysis for informational purposes only,
-            not professional financial or tax advice.
-          </p>
         </div>
+
+        <div className="flex items-center justify-between mb-8">
+          <p className="text-sm text-ink/50 font-body">{email}</p>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-ink/60 underline underline-offset-4 hover:text-ink transition-colors font-body"
+          >
+            Log out
+          </button>
+        </div>
+
+        <p className="font-body text-ink/70 text-base leading-relaxed max-w-xl mb-1">
+          Enter your financials below. We compute the ratios and explain
+          what each one means in plain language — the read a CA would
+          give you, without the wait.
+        </p>
+        <p className="text-xs text-ink/40 font-body mb-10">
+          This is an AI-generated analysis for informational purposes only,
+          not professional financial or tax advice.
+        </p>
 
         <div className="border-t border-rule pt-10">
           <UploadForm onSubmit={handleSubmit} loading={loading} />

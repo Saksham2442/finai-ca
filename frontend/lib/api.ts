@@ -1,5 +1,5 @@
-// Talks to your FastAPI backend. Change the port here if your backend
-// runs somewhere other than 8001.
+import { getToken, clearToken } from "@/lib/auth";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8001";
 
 export interface FinancialInput {
@@ -38,9 +38,12 @@ export interface AnalysisSummary {
   created_at: string;
 }
 
-// FastAPI validation errors (422) come back as an array of objects like
-// { loc: ["body", "revenue"], msg: "Value error, revenue cannot be negative" }
-// rather than a single string. This turns either shape into one readable message.
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  email: string;
+}
+
 function extractErrorMessage(body: any, fallbackStatus: number): string {
   if (typeof body.detail === "string") {
     return body.detail;
@@ -57,10 +60,55 @@ function extractErrorMessage(body: any, fallbackStatus: number): string {
   return `Request failed with status ${fallbackStatus}`;
 }
 
+async function authedFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  const headers = new Headers(options.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+
+  if (res.status === 401) {
+    clearToken();
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+  }
+
+  return res;
+}
+
+export async function signup(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(body, res.status));
+  }
+  return res.json();
+}
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(body, res.status));
+  }
+  return res.json();
+}
+
 export async function analyzeManual(
   input: FinancialInput
 ): Promise<AnalysisResult> {
-  const res = await fetch(`${API_BASE}/analyze/manual/explain`, {
+  const res = await authedFetch(`/analyze/manual/explain`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -75,7 +123,7 @@ export async function analyzeManual(
 }
 
 export async function fetchHistory(): Promise<AnalysisSummary[]> {
-  const res = await fetch(`${API_BASE}/analyses`);
+  const res = await authedFetch(`/analyses`);
   if (!res.ok) {
     throw new Error(`Could not load history (status ${res.status})`);
   }
@@ -83,13 +131,26 @@ export async function fetchHistory(): Promise<AnalysisSummary[]> {
 }
 
 export async function fetchAnalysisById(id: number): Promise<AnalysisResult> {
-  const res = await fetch(`${API_BASE}/analyses/${id}`);
+  const res = await authedFetch(`/analyses/${id}`);
   if (!res.ok) {
     throw new Error(`Could not load analysis ${id} (status ${res.status})`);
   }
   return res.json();
 }
 
-export function getPdfUrl(id: number): string {
-  return `${API_BASE}/analyses/${id}/pdf`;
+export async function downloadPdf(id: number, companyName: string): Promise<void> {
+  const res = await authedFetch(`/analyses/${id}/pdf`);
+  if (!res.ok) {
+    throw new Error(`Could not download PDF (status ${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const slug = companyName.replace(/[^a-zA-Z0-9]/g, "_");
+  a.download = `${slug}_financial_analysis.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
 }

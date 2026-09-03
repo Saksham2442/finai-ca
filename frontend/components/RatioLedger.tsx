@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import type { AnalysisResult } from "@/lib/api";
-import { getPdfUrl } from "@/lib/api";
+import { downloadPdf } from "@/lib/api";
 import {
   BarChart,
   Bar,
@@ -26,6 +27,9 @@ function formatRatioName(key: string) {
 }
 
 export default function RatioLedger({ result }: { result: AnalysisResult }) {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
   const chartData = Object.entries(result.ratios)
     .filter(([, v]) => v !== null)
     .map(([key, value]) => ({
@@ -35,12 +39,31 @@ export default function RatioLedger({ result }: { result: AnalysisResult }) {
       value: value as number,
     }));
 
+  async function handleDownload() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      await downloadPdf(result.id, result.input.company_name);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Could not download PDF.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="mt-14 space-y-10">
-      <div className="flex justify-end">
-        <a href={getPdfUrl(result.id)} download className="inline-flex items-center gap-2 text-sm text-ink/70 border border-rule px-4 py-2 hover:border-ink hover:text-ink transition-colors font-body">
-          Download PDF
-        </a>
+      <div className="flex flex-col items-end gap-1">
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="inline-flex items-center gap-2 text-sm text-ink/70 border border-rule px-4 py-2 hover:border-ink hover:text-ink transition-colors font-body disabled:opacity-50"
+        >
+          {downloading ? "Preparing PDF…" : "Download PDF"}
+        </button>
+        {downloadError && (
+          <p className="text-xs text-concern font-body">{downloadError}</p>
+        )}
       </div>
 
       {result.warnings && result.warnings.length > 0 && (
